@@ -1,15 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 
-// const firebaseConfig = {
-// apiKey: "AIzaSyDODo0jhKM_OC1Zdf6YuDBIOfMtPaIU2gU",
-// authDomain: "quickscoutv2.firebaseapp.com",
-// projectId: "quickscoutv2",
-// storageBucket: "quickscoutv2.firebasestorage.app",
-// messagingSenderId: "43642572752",
-// appId: "1:43642572752:web:315037a72ac9a1f90df3d5",
-// measurementId: "G-F2360Z6CXY",
-// };
 const firebaseConfig = JSON.parse(
 atob(
   "eyJhcGlLZXkiOiJBSXphU3lET0RvMGpoS01fT0MxWmRmNll1" +
