@@ -21,11 +21,12 @@ const navItems = [
   { id: "matches", label: "Matches", icon: Trophy },
   { id: "scouting", label: "Scouting", icon: ClipboardList },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
+  { id: "ai summary", label: "Ai(dan) Summary", icon: Bot },
 ];
 
 const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 bg-sidebar border-r border-sidebar-border flex flex-col">
+    <aside className="hidden md:fixed md:left-0 md:top-0 md:h-screen md:w-64 md:bg-sidebar md:border-r md:border-sidebar-border md:flex md:flex-col">
       {/* Logo */}
       <div className="p-6 border-b border-sidebar-border">
         <div className="flex items-center gap-3">

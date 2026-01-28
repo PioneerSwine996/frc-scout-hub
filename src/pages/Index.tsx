@@ -2,7 +2,9 @@ import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import Sidebar from "@/components/Sidebar";
 import Dashboard from "@/components/Dashboard";
-import { Bell, Search, User, LogOut } from "lucide-react";
+import { Bell, Search, User, LogOut, Menu } from "lucide-react";
+import { Drawer, DrawerTrigger, DrawerContent } from "@/components/ui/drawer";
+import MobileSidebarContent from "@/components/MobileSidebarContent";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 
@@ -38,19 +40,33 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background">
       <Sidebar activeTab={activeTab} onTabChange={handleTabChange} />
-      
+
       {/* Main Content */}
-      <main className="ml-64 min-h-screen">
+      <main className="md:ml-64 min-h-screen max-h-screen overflow-auto touch-pan-y" style={{ WebkitOverflowScrolling: 'touch' }}>
         {/* Top Bar */}
         <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search teams, matches, data..."
-                className="w-full pl-10 pr-4 py-2 bg-secondary/50 border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
-              />
+              <div className="flex items-center gap-3">
+              <div className="md:hidden">
+                <Drawer>
+                  <DrawerTrigger>
+                    <button className="p-2">
+                      <Menu className="w-5 h-5" />
+                    </button>
+                  </DrawerTrigger>
+                  <DrawerContent>
+                    <MobileSidebarContent activeTab={activeTab} onTabChange={handleTabChange} />
+                  </DrawerContent>
+                </Drawer>
+              </div>
+              <div className="hidden md:block relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search teams, matches, data..."
+                  className="w-full pl-10 pr-4 py-2 bg-secondary/50 border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                />
+              </div>
             </div>
             <div className="flex items-center gap-4">
               <button className="relative p-2 text-muted-foreground hover:text-foreground transition-colors">
