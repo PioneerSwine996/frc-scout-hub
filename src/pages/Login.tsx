@@ -73,7 +73,6 @@ const Login = () => {
                     className="w-full"
                   />
                 </div>
-
                 <div className="space-y-2">
                   <label htmlFor="password" className="text-sm font-medium text-foreground">
                     Password
