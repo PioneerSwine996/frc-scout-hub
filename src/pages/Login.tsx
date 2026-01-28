@@ -9,22 +9,41 @@ const Login = () => {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const { login } = useAuth();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) return;
+    setError("");
+    setLoading(true);
 
-    const isLead = /\blead\b/i.test(trimmed);
-    if (isLead) {
-      // require email and password for lead roles
-      if (!email.trim() || !password) {
+    try {
+      const trimmed = name.trim();
+      if (!trimmed) {
+        setError("Please enter your name");
+        setLoading(false);
         return;
       }
-    }
 
-    login(trimmed);
+      const isLead = /\blead\b/i.test(trimmed);
+      if (isLead) {
+        if (!email.trim() || !password) {
+          setError("Please enter email and password");
+          setLoading(false);
+          return;
+        }
+        await login(trimmed, email, password);
+      } else {
+        await login(trimmed);
+      }
+    } catch (err) {
+      // const errorMessage = err instanceof Error ? err.message : "Login failed";
+      const errorMessage = "Login failed. Incorrect Email or Password.";
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -41,6 +60,12 @@ const Login = () => {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="p-3 bg-destructive/10 text-destructive text-sm rounded-md">
+                {error}
+              </div>
+            )}
+
             <div className="space-y-2">
               <label htmlFor="name" className="text-sm font-medium text-foreground">
                 Your Name
@@ -51,7 +76,7 @@ const Login = () => {
                 placeholder="Enter your name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                required
+                disabled={loading}
                 className="w-full"
               />
             </div>
@@ -69,7 +94,7 @@ const Login = () => {
                     placeholder="lead@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    required
+                    disabled={loading}
                     className="w-full"
                   />
                 </div>
@@ -83,7 +108,7 @@ const Login = () => {
                     placeholder="Enter password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    required
+                    disabled={loading}
                     className="w-full"
                   />
                 </div>
@@ -92,11 +117,9 @@ const Login = () => {
             <Button
               type="submit"
               className="w-full"
-              disabled={
-                !name.trim() || (/\blead\b/i.test(name) && (!email.trim() || !password))
-              }
+              disabled={loading || !name.trim() || (/\blead\b/i.test(name) && (!email.trim() || !password))}
             >
-              Login
+              {loading ? "Logging in..." : "Login"}
             </Button>
           </form>
         </CardContent>
