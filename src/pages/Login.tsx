@@ -7,13 +7,24 @@ import { Bot } from "lucide-react";
 
 const Login = () => {
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const { login } = useAuth();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (name.trim()) {
-      login(name.trim());
+    const trimmed = name.trim();
+    if (!trimmed) return;
+
+    const isLead = /\blead\b/i.test(trimmed);
+    if (isLead) {
+      // require email and password for lead roles
+      if (!email.trim() || !password) {
+        return;
+      }
     }
+
+    login(trimmed);
   };
 
   return (
@@ -44,7 +55,48 @@ const Login = () => {
                 className="w-full"
               />
             </div>
-            <Button type="submit" className="w-full" disabled={!name.trim()}>
+
+            {/* If the name indicates a lead role, show Email and Password */}
+            {/\blead\b/i.test(name) && (
+              <>
+                <div className="space-y-2">
+                  <label htmlFor="email" className="text-sm font-medium text-foreground">
+                    Email
+                  </label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="lead@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    className="w-full"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="password" className="text-sm font-medium text-foreground">
+                    Password
+                  </label>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="Enter password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="w-full"
+                  />
+                </div>
+              </>
+            )}
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={
+                !name.trim() || (/\blead\b/i.test(name) && (!email.trim() || !password))
+              }
+            >
               Login
             </Button>
           </form>

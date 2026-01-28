@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "@/components/Sidebar";
+import { Drawer, DrawerTrigger, DrawerContent } from "@/components/ui/drawer";
+import MobileSidebarContent from "@/components/MobileSidebarContent";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,6 +27,7 @@ import {
   User,
   LogOut,
   X,
+  Menu,
 } from "lucide-react";
 import {
   Select,
@@ -375,17 +378,31 @@ const Scouting = () => {
       <Sidebar activeTab={activeTab} onTabChange={handleTabChange} />
 
       {/* Main Content */}
-      <main className="ml-64 min-h-screen">
+      <main className="md:ml-64 min-h-screen max-h-screen overflow-auto touch-pan-y" style={{ WebkitOverflowScrolling: 'touch' }}>
         {/* Top Bar */}
         <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search teams, matches, data..."
-                className="w-full pl-10 pr-4 py-2 bg-secondary/50 border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
-              />
+            <div className="flex items-center gap-3">
+              <div className="md:hidden">
+                <Drawer>
+                  <DrawerTrigger>
+                    <button className="p-2">
+                      <Menu className="w-5 h-5" />
+                    </button>
+                  </DrawerTrigger>
+                  <DrawerContent>
+                    <MobileSidebarContent activeTab={activeTab} onTabChange={handleTabChange} />
+                  </DrawerContent>
+                </Drawer>
+              </div>
+              <div className="hidden md:block relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search teams, matches, data..."
+                  className="w-full pl-10 pr-4 py-2 bg-secondary/50 border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                />
+              </div>
             </div>
             <div className="flex items-center gap-4">
               <button className="relative p-2 text-muted-foreground hover:text-foreground transition-colors">
@@ -466,45 +483,88 @@ const Scouting = () => {
             {isActivePhase && (
               <Card className={isTimerRunning ? "border-primary" : ""}>
                 <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="flex items-center gap-2">
-                        <Clock className="w-5 h-5" />
-                        {getPhaseName(phase)}
-                        {teamNumber && (
-                          <span className="text-sm font-normal text-muted-foreground">
-                            - Team {teamNumber}
-                          </span>
-                        )}
-                      </CardTitle>
-                      <CardDescription>
-                        {isTimerRunning
-                          ? "Timer is running"
-                          : phase === "complete"
-                            ? "Scouting session complete"
-                            : "Timer paused - click resume to continue"}
-                      </CardDescription>
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="grid grid-cols-[auto,1fr] gap-3 items-start">
+                        <div className="pt-1">
+                          <Clock className="w-5 h-5 flex-shrink-0" />
+                        </div>
+                        <div className="min-w-0">
+                          <CardTitle>
+                            <span
+                              className="text-2xl sm:text-[1.25rem] font-mono font-bold whitespace-normal leading-snug block"
+                              style={{
+                                display: "-webkit-box",
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: "vertical",
+                                overflow: "hidden",
+                              }}
+                            >
+                              {getPhaseName(phase)}
+                            </span>
+                          </CardTitle>
+                          <CardDescription className="mt-1">
+                            {isTimerRunning
+                              ? "Timer is running"
+                              : phase === "complete"
+                                ? "Scouting session complete"
+                                : "Timer paused - click resume to continue"}
+                          </CardDescription>
+                        </div>
+                      </div>
                     </div>
-                    {!isComplete && (
+
+                    <div className="ml-4 flex flex-col items-end justify-start shrink-0">
+                      {teamNumber && (
+                        <div className="text-sm font-normal text-muted-foreground mb-2 whitespace-nowrap">
+                          Team {teamNumber}
+                        </div>
+                      )}
+                      {!isComplete && (
+                        <div className="hidden sm:block">
+                          <Button
+                            onClick={handleCancelClick}
+                            variant={cancelConfirm ? "destructive" : "outline"}
+                            size="sm"
+                            className={`${
+                              cancelConfirm ? "bg-destructive hover:bg-destructive/90" : ""
+                            } whitespace-normal text-left leading-tight flex items-center gap-2 h-auto py-2 max-w-[320px]`}
+                          >
+                            <span className="flex-shrink-0">
+                              <X className="w-4 h-4" />
+                            </span>
+                            <span className="flex-1 min-w-0">
+                              {cancelConfirm
+                                ? "Are you sure? Click again to cancel"
+                                : "Cancel Scouting"}
+                            </span>
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {/* Mobile: show cancel button below header so it doesn't overflow */}
+                  {!isComplete && (
+                    <div className="sm:hidden mb-4">
                       <Button
                         onClick={handleCancelClick}
                         variant={cancelConfirm ? "destructive" : "outline"}
                         size="sm"
-                        className={
-                          cancelConfirm
-                            ? "bg-destructive hover:bg-destructive/90"
-                            : ""
-                        }
+                        className={`w-full ${cancelConfirm ? "bg-destructive hover:bg-destructive/90" : ""} whitespace-normal text-center leading-tight flex items-center justify-center gap-2 h-auto py-2`}
                       >
-                        <X className="w-4 h-4 mr-2" />
-                        {cancelConfirm
-                          ? "Are you sure? Click again to cancel"
-                          : "Cancel Scouting"}
+                        <span className="flex-shrink-0">
+                          <X className="w-4 h-4" />
+                        </span>
+                        <span>
+                          {cancelConfirm
+                            ? "Are you sure? Click again to cancel"
+                            : "Cancel Scouting"}
+                        </span>
                       </Button>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent>
+                    </div>
+                  )}
                   <div className="text-center py-4">
                     <div
                       className={`text-6xl font-mono font-bold ${
