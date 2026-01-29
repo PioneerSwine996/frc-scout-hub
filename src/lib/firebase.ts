@@ -1,5 +1,8 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
+import { getAnalytics } from "firebase/analytics";
+import { getDatabase } from "firebase/database";
+import { get } from "http";
 
 const firebaseConfig = JSON.parse(
 atob(
@@ -20,3 +23,7 @@ const app = initializeApp(firebaseConfig);
 
 // Initialize Firebase Authentication and get a reference to the service
 export const auth = getAuth(app);
+
+export const analytics = getAnalytics(app);
+// Realtime Database (export name `db` so existing imports keep working)
+export const db = getDatabase(app);
