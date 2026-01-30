@@ -29,6 +29,8 @@ import {
   X,
   Menu,
 } from "lucide-react";
+import { useQueue } from "@/hooks/use-queue";
+import { subscribeToUserAssignment } from "@/lib/queue";
 import {
   Select,
   SelectContent,
@@ -36,6 +38,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { getDatabase, ref, set, serverTimestamp, remove } from "firebase/database";
+import { db } from "@/lib/firebase";
 
 const PHASE_DURATIONS = {
   AUTONOMOUS: 20,
@@ -74,6 +78,92 @@ const Scouting = () => {
     navigate("/login");
   };
 
+  // queue + role helpers
+  const isLeadName = (name?: string) => !!name && /\blead\b/i.test(name);
+  const {
+    queue,
+    topSix,
+    join,
+    leave,
+    start,
+    endMatch,
+    activeMatch,
+    isInQueue,
+    isInTopSix,
+    loading: queueLoading,
+  } = useQueue(user ? { id: user.id, name: user.name } : null);
+  const isLead = isLeadName(user?.name);
+
+  const handleQueueToggle = async () => {
+    try {
+      if (isInQueue) {
+        await leave();
+      } else {
+        await join();
+      }
+    } catch (err) {
+      console.error(err);
+      alert((err as Error)?.message || "Queue error");
+    }
+  };
+
+  const [teamAssignments, setTeamAssignments] = useState<string[]>([
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+  ]);
+
+  const setAssignment = (index: number, value: string) => {
+    setTeamAssignments((prev) => {
+      const copy = [...prev];
+      copy[index] = value.replace(/[^0-9]/g, "").slice(0, 5); // numeric, max 5 digits
+      return copy;
+    });
+  };
+
+  const validAssignment = (s: string) => /^\d{1,5}$/.test(s);
+  const handleStartMatch = async () => {
+    try {
+      // prevent starting if another match is already active
+      if (activeMatch) {
+        alert("A match is already running — end it before starting a new one.");
+        return;
+      }
+
+      // for active slots, require an assignment if there's someone queued
+      const required = Math.min(6, topSix.length);
+      const assigned = teamAssignments.slice(0, required);
+      const invalid = assigned.some((v) => !validAssignment(v));
+      if (required > 0 && invalid) {
+        alert(
+          "Please enter valid team numbers for the active slots (numbers only)",
+        );
+        return;
+      }
+
+      const matchId = await start(assigned);
+      alert(`Match started — id: ${matchId}`);
+      // clear inputs after start
+      setTeamAssignments(["", "", "", "", "", ""]);
+    } catch (err) {
+      console.error(err);
+      alert((err as Error)?.message || "Failed to start match");
+    }
+  };
+
+  const handleEndMatch = async () => {
+    try {
+      if (!activeMatch?.id) return alert("No active match to end");
+      await endMatch(activeMatch.id);
+    } catch (err) {
+      console.error(err);
+      alert((err as Error)?.message || "Failed to end match");
+    }
+  };
+
   const [phase, setPhase] = useState<ScoutingPhase>("idle");
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
@@ -103,6 +193,11 @@ const Scouting = () => {
   const cancelTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const currentMatchIdRef = useRef<string | null>(null);
+  const assignedTeamRef = useRef<string | null>(null);
+
+  const matchEndedHandledRef = useRef(false);
 
   const getPhaseDuration = (currentPhase: ScoutingPhase): number => {
     switch (currentPhase) {
@@ -244,11 +339,18 @@ const Scouting = () => {
     };
   }, [isTimerRunning, timeRemaining, advancePhase]);
 
-  const startScouting = () => {
-    if (!teamNumber.trim()) {
+  const startScouting = (teamNum?: string) => {
+    const effectiveTeam = (
+      typeof teamNum === "string" ? teamNum : teamNumber
+    ).trim();
+    if (!effectiveTeam) {
       alert("Please enter a team number");
       return;
     }
+
+    // ensure UI reflects the team number immediately
+    if (teamNum) setTeamNumber(String(teamNum));
+
     setPhase("autonomous");
     setTimeRemaining(PHASE_DURATIONS.AUTONOMOUS);
     setIsTimerRunning(true);
@@ -262,6 +364,35 @@ const Scouting = () => {
     setEndGameNotes("");
     setDidClimb(false);
   };
+
+  // Auto-start when assigned by a lead: subscribe to our /users/{id}/currentAssignment
+  const lastProcessedAssignmentRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const unsub = subscribeToUserAssignment(user.id, (assignment) => {
+      if (!assignment) {
+        if (!matchEndedHandledRef.current && phase !== "idle") {
+          matchEndedHandledRef.current = true;
+          alert(
+            "The lead has signaled the end of the match. Please finish and submit your scouting.",
+          );
+        }
+        return;
+      }
+
+      currentMatchIdRef.current = assignment.matchId;
+      assignedTeamRef.current = String(assignment.teamNumber);
+
+      matchEndedHandledRef.current = false;
+
+      if (phase === "idle") {
+        startScouting(String(assignment.teamNumber));
+      }
+    });
+
+    return unsub;
+  }, [user?.id, phase]);
 
   const pauseTimer = () => {
     setIsTimerRunning(false);
@@ -324,7 +455,54 @@ const Scouting = () => {
     }
   };
 
-  const resetScouting = () => {
+  const resetScouting = async () => {
+    try {
+      const matchId = currentMatchIdRef.current;
+      const assignedTeam = assignedTeamRef.current;
+
+      if (!matchId || !user?.id || !assignedTeam) {
+        console.warn("resetScouting: missing matchId, user, or assignedTeam");
+        return;
+      }
+
+      const db = getDatabase();
+
+      const participantRef = ref(
+        db,
+        `matches/${matchId}/participants/${user.id}`,
+      );
+
+      await set(participantRef, {
+        userId: user.id,
+        scoutName: user.name || "Unknown",
+        teamNumber: assignedTeam,
+        matchId,
+
+        submittedAt: serverTimestamp(),
+
+        autonomous: {
+          fuel: autonomousFuel,
+          notes: autonomousNotes,
+          canClimb,
+        },
+
+        teleop: {
+          fuel: teleopFuel,
+          notes: teleopNotes,
+        },
+
+        endGame: {
+          didClimb,
+          climbLevel: didClimb ? climbLevel : null,
+          defenseScore,
+          notes: endGameNotes,
+        },
+      });
+    } catch (err) {
+      console.error("Failed to submit scouting data:", err);
+      alert("Failed to save scouting data. Please notify a lead.");
+    }
+
     setPhase("idle");
     setIsTimerRunning(false);
     setTimeRemaining(0);
@@ -339,6 +517,7 @@ const Scouting = () => {
     setDidClimb(false);
     setShowClimbButton(false);
     setCancelConfirm(false);
+
     if (climbButtonTimeoutRef.current) {
       clearTimeout(climbButtonTimeoutRef.current);
       climbButtonTimeoutRef.current = null;
@@ -378,7 +557,10 @@ const Scouting = () => {
       <Sidebar activeTab={activeTab} onTabChange={handleTabChange} />
 
       {/* Main Content */}
-      <main className="md:ml-64 min-h-screen max-h-screen overflow-auto touch-pan-y" style={{ WebkitOverflowScrolling: 'touch' }}>
+      <main
+        className="md:ml-64 min-h-screen max-h-screen overflow-auto touch-pan-y"
+        style={{ WebkitOverflowScrolling: "touch" }}
+      >
         {/* Top Bar */}
         <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border px-6 py-4">
           <div className="flex items-center justify-between">
@@ -391,7 +573,10 @@ const Scouting = () => {
                     </button>
                   </DrawerTrigger>
                   <DrawerContent>
-                    <MobileSidebarContent activeTab={activeTab} onTabChange={handleTabChange} />
+                    <MobileSidebarContent
+                      activeTab={activeTab}
+                      onTabChange={handleTabChange}
+                    />
                   </DrawerContent>
                 </Drawer>
               </div>
@@ -446,6 +631,171 @@ const Scouting = () => {
               </div>
             </div>
 
+            {(isLead || (phase === "idle" && !activeMatch)) && (
+              /* Match Queue (lead: start match, others: join queue) */
+              <Card>
+                <CardHeader>
+                  <CardTitle>Match Queue</CardTitle>
+                  <CardDescription>
+                    First 6 in the queue will be selected to start scouting
+                    (real-time)
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* queue list + status */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm text-muted-foreground">
+                        Live queue — ordered by join time
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Active slots: 6
+                      </div>
+                    </div>
+
+                    <ul className="space-y-2 mt-2">
+                      {queue.length === 0 && (
+                        <li className="text-sm text-muted-foreground">
+                          No one in queue yet
+                        </li>
+                      )}
+
+                      {queue.map((q, idx) => (
+                        <li
+                          key={q.id}
+                          className={`flex items-center justify-between p-2 rounded-md border ${idx < 6 ? "bg-primary/5 border-primary/20" : "bg-secondary"}`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-sm font-medium">
+                              {q.name?.charAt(0)?.toUpperCase() || "?"}
+                            </div>
+                            <div>
+                              <div className="text-sm font-medium">
+                                {q.name}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {idx < 6
+                                  ? `#${idx + 1} — active`
+                                  : `#${idx + 1}`}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            {user?.id === q.userId && isInTopSix && (
+                              <div className="text-xs text-success font-medium">
+                                You are in the active 6
+                              </div>
+                            )}
+
+                            {/* Lead preview: show assigned team number for active slots */}
+                            {isLead && idx < 6 && teamAssignments[idx] && (
+                              <div className="text-sm px-2 py-1 rounded-md bg-amber-50 text-amber-700">
+                                Team {teamAssignments[idx]}
+                              </div>
+                            )}
+
+                            {idx < 6 && (
+                              <div className="text-xs px-2 py-1 rounded-md bg-primary/10 text-primary">
+                                Active
+                              </div>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Lead: team-number assignment inputs */}
+                  {isLead && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {Array.from({ length: 6 }).map((_, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <label className="text-xs text-muted-foreground w-6">
+                            #{i + 1}
+                          </label>
+                          <Input
+                            aria-label={`Team number ${i + 1}`}
+                            value={teamAssignments[i]}
+                            onChange={(e) => setAssignment(i, e.target.value)}
+                            className="w-28"
+                            placeholder="team #"
+                            inputMode="numeric"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 items-center">
+                    {!isLead ? (
+                      phase === "idle" && !activeMatch ? (
+                        <Button
+                          onClick={handleQueueToggle}
+                          disabled={queueLoading}
+                          className="flex-1"
+                        >
+                          <Plus className="w-4 h-4 mr-2" />
+                          {isInQueue ? "Leave queue" : "Join queue"}
+                        </Button>
+                      ) : (
+                        <div className="flex-1 text-center text-sm text-muted-foreground">
+                          Scouting in progress
+                        </div>
+                      )
+                    ) :
+                    activeMatch ? (
+                      activeMatch.startedBy === user?.id ? (
+                        <Button
+                          onClick={handleEndMatch}
+                          variant="destructive"
+                          className="flex-1"
+                          disabled={queueLoading}
+                        >
+                          End match
+                        </Button>
+                      ) : (
+                        <Button className="flex-1" disabled>
+                          Match running elsewhere
+                        </Button>
+                      )
+                    ) : (
+                      <Button
+                        onClick={handleStartMatch}
+                        disabled={
+                          queueLoading ||
+                          topSix.length === 0 ||
+                          (topSix.length > 0 &&
+                            !teamAssignments
+                              .slice(0, Math.min(6, topSix.length))
+                              .every((v) => /^\d{1,5}$/.test(v)))
+                        }
+                        className="flex-1"
+                      >
+                        <Play className="w-4 h-4 mr-2" />
+                        Assign & Start match
+                      </Button>
+                    )}
+
+                    <div className="w-48 text-right text-sm text-muted-foreground">
+                      {isLead ? (
+                        <div>
+                          Lead controls — assign teams to the active 6 and start
+                          match
+                        </div>
+                      ) : (
+                        <div>
+                          {isInTopSix
+                            ? "You're in the active 6"
+                            : "First 6 will be selected automatically"}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Start Scouting Card */}
             {phase === "idle" && (
               <Card>
@@ -466,82 +816,82 @@ const Scouting = () => {
                       onChange={(e) => setTeamNumber(e.target.value)}
                     />
                   </div>
-                  <Button
-                    onClick={startScouting}
-                    className="w-full"
-                    size="lg"
-                    disabled={!teamNumber.trim()}
-                  >
-                    <Play className="w-4 h-4 mr-2" />
-                    Start Scouting
-                  </Button>
+
+                  {isLead ? (
+                    <Button
+                      onClick={() => startScouting()}
+                      className="w-full"
+                      size="lg"
+                      disabled={!teamNumber.trim()}
+                    >
+                      <Play className="w-4 h-4 mr-2" />
+                      Start Scouting
+                    </Button>
+                  ) : (
+                    <div className="w-full text-center text-sm text-muted-foreground">
+                      You will be started automatically when the lead assigns a
+                      team to you.
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
 
-            {/* Timer Card */}
             {isActivePhase && (
-              <Card className={isTimerRunning ? "border-primary" : ""}>
+              <Card>
                 <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <div className="grid grid-cols-[auto,1fr] gap-3 items-start">
-                        <div className="pt-1">
-                          <Clock className="w-5 h-5 flex-shrink-0" />
-                        </div>
-                        <div className="min-w-0">
-                          <CardTitle>
-                            <span
-                              className="text-2xl sm:text-[1.25rem] font-mono font-bold whitespace-normal leading-snug block"
-                              style={{
-                                display: "-webkit-box",
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: "vertical",
-                                overflow: "hidden",
-                              }}
-                            >
-                              {getPhaseName(phase)}
-                            </span>
-                          </CardTitle>
-                          <CardDescription className="mt-1">
-                            {isTimerRunning
-                              ? "Timer is running"
-                              : phase === "complete"
-                                ? "Scouting session complete"
-                                : "Timer paused - click resume to continue"}
-                          </CardDescription>
-                        </div>
-                      </div>
-                    </div>
+                  <div className="flex-1">
+                    <CardTitle>
+                      <span
+                        className="text-2xl sm:text-[1.25rem] font-mono font-bold whitespace-normal leading-snug block"
+                        style={{
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {getPhaseName(phase)}
+                      </span>
+                    </CardTitle>
+                    <CardDescription className="mt-1">
+                      {isTimerRunning
+                        ? "Timer is running"
+                        : isComplete
+                          ? "Scouting session complete"
+                          : "Timer paused - click resume to continue"}
+                    </CardDescription>
+                  </div>
 
-                    <div className="ml-4 flex flex-col items-end justify-start shrink-0">
-                      {teamNumber && (
-                        <div className="text-sm font-normal text-muted-foreground mb-2 whitespace-nowrap">
-                          Team {teamNumber}
-                        </div>
-                      )}
-                      {!isComplete && (
-                        <div className="hidden sm:block">
-                          <Button
-                            onClick={handleCancelClick}
-                            variant={cancelConfirm ? "destructive" : "outline"}
-                            size="sm"
-                            className={`${
-                              cancelConfirm ? "bg-destructive hover:bg-destructive/90" : ""
-                            } whitespace-normal text-left leading-tight flex items-center gap-2 h-auto py-2 max-w-[320px]`}
-                          >
-                            <span className="flex-shrink-0">
-                              <X className="w-4 h-4" />
-                            </span>
-                            <span className="flex-1 min-w-0">
-                              {cancelConfirm
-                                ? "Are you sure? Click again to cancel"
-                                : "Cancel Scouting"}
-                            </span>
-                          </Button>
-                        </div>
-                      )}
-                    </div>
+                  <div className="ml-4 flex flex-col items-end justify-start shrink-0">
+                    {teamNumber && (
+                      <div className="text-sm font-normal text-muted-foreground mb-2 whitespace-nowrap">
+                        Team {teamNumber}
+                      </div>
+                    )}
+                    {!isComplete && (
+                      <div className="hidden sm:block">
+                        <Button
+                          onClick={handleCancelClick}
+                          variant={cancelConfirm ? "destructive" : "outline"}
+                          size="sm"
+                          className={`${
+                            cancelConfirm
+                              ? "bg-destructive hover:bg-destructive/90"
+                              : ""
+                          } whitespace-normal text-left leading-tight flex items-center gap-2 h-auto py-2 max-w-[320px]`}
+                        >
+                          <span className="flex-shrink-0">
+                            <X className="w-4 h-4" />
+                          </span>
+                          <span className="flex-1 min-w-0">
+                            {cancelConfirm
+                              ? "Are you sure? Click again to cancel"
+                              : "Cancel Scouting"}
+                          </span>
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -804,7 +1154,10 @@ const Scouting = () => {
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <Select value={defenseScore} onValueChange={setDefenseScore}>
+                    <Select
+                      value={defenseScore}
+                      onValueChange={setDefenseScore}
+                    >
                       <SelectTrigger className="w-[180px]">
                         <SelectValue placeholder="Select score" />
                       </SelectTrigger>
