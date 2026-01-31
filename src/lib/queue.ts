@@ -546,3 +546,47 @@ export const subscribeToUserAssignment = (
   });
   return () => unsub();
 };
+
+
+export const cleanupStaleUsers = async (
+  maxAgeMs = 10 * 60 * 1000 // 10 minutes
+) => {
+  try {
+    const usersSnap = await get(ref(db, "users"));
+    if (!usersSnap.exists()) return;
+
+    const now = Date.now();
+    const ops: Promise<any>[] = [];
+
+    usersSnap.forEach((child) => {
+      const userId = child.key!;
+      const val = child.val();
+      const lastActive =
+        typeof val?.lastActive === "number" ? val.lastActive : null;
+
+      if (!lastActive || now - lastActive > maxAgeMs) {
+        // remove user
+        ops.push(remove(ref(db, `users/${userId}`)));
+
+        // remove queue entries
+        ops.push(
+          get(
+            query(ref(db, "queue"), orderByChild("userId"), equalTo(userId))
+          ).then((snap) => {
+            const removes: Promise<void>[] = [];
+            snap.forEach((c) => {
+              removes.push(remove(ref(db, `queue/${c.key}`)));
+            });
+            return Promise.all(removes);
+          })
+        );
+      }
+    });
+
+    await Promise.all(ops);
+  } catch (err) {
+    console.error("cleanupStaleUsers error", err);
+  }
+};
+
+
